@@ -1,0 +1,11 @@
+{
+  "id": "magica.paletteeditor",
+  "name": "Palette Editor",
+  "version": "1.0.0",
+  "authors": "MagicaJaphet",
+  "description": "Checks workshop mods if they've been updated post Watcher release.",
+  "requirements": [],
+  "requirements_names": [],
+  "tags": [],
+  "checksum_override_version": false,
+}
