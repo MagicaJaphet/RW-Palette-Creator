@@ -1,5 +1,10 @@
-Use this template on GitHub or just [download the code](https://github.com/alduris/TemplateMod/archive/refs/heads/master.zip), whichever is easiest.
+## Rain World Palette Creator
+A mod aiming to make creating palettes easier.
 
-Rename `src/TestMod.csproj`, then edit `mod/modinfo.json` and `src/Plugin.cs` to customize your mod.
+### Current Tools
+- Left Click - Paint onto palette texture
+- Scroll Wheel - Changes brush size
+- Right Click - Color picker
 
-See [the modding wiki](https://rainworldmodding.miraheze.org/wiki/Downpour_Reference/Mod_Directories) for `modinfo.json` documentation.
+### Output
+The save image button outputs to ``{Rain World Installation}/RainWorld_Data/StreamingAssets/savedpalettes`` which creates a mirror of the png by it's original palette name.
