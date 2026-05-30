@@ -3,9 +3,9 @@
   "name": "Palette Editor",
   "version": "1.0.0",
   "authors": "MagicaJaphet",
-  "description": "Checks workshop mods if they've been updated post Watcher release.",
-  "requirements": [],
-  "requirements_names": [],
+  "description": "A tool for creating region palettes in real time.",
+  "requirements": ["magica.hookinglibrary"],
+  "requirements_names": ["Hooking Library"],
   "tags": [],
   "checksum_override_version": false,
 }
