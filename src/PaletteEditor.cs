@@ -8,7 +8,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using UnityEngine;
 
 namespace PaletteEditor;
@@ -28,7 +27,7 @@ internal class PaletteEditor
 		private Texture2D _texture;
 
 		private int _index;
-		private static readonly int _undoStack = 30;
+		private static int UndoStack { get => RemixOptions.UndoStack.Value; }
 		private readonly List<Color[]> _stack = [];
 		private Color[] _init;
 		internal static readonly int _colorHistory = 8;
@@ -66,88 +65,91 @@ internal class PaletteEditor
 			}
 		}
 
-		internal void Paint(int x, int y)
+		internal void Paint(int x, int y, bool blend = true)
 		{
 			if (Texture == null) return;
 			ColorOperator a = new(Texture.GetPixel(x, y)); // base layer
 			ColorOperator b = new(PaintColor.Value); // top layer
 
-			Color equal = b.Color;
-			equal.a = Alpha;
-			if (_history[0] != equal)
+			// Blend mode calculations
+			if (blend)
 			{
-				for (int i = _history.Length - 1; i >= 1; i--)
+				Color equal = b.Color;
+				equal.a = Alpha;
+				if (_history[0] != equal)
 				{
-					var lastState = _history[i - 1];
-					UpdateHistory(i, lastState.a, lastState);
+					for (int i = _history.Length - 1; i >= 1; i--)
+					{
+						var lastState = _history[i - 1];
+						UpdateHistory(i, lastState.a, lastState);
+					}
+
+					UpdateHistory(0, Alpha, b.Color);
 				}
 
-				UpdateHistory(0, Alpha, b.Color);
-			}
+				switch (CurrentBlendMode)
+				{
+					case BlendMode.Normal:
+						break;
 
-			// Blend mode calculations
-			switch (CurrentBlendMode)
-			{
-				case BlendMode.Normal:
-					break;
+					case BlendMode.Multiply:
+						b *= a;
+						break;
 
-				case BlendMode.Multiply:
-					b *= a;
-					break;
+					case BlendMode.Screen:
+						b = (a.Inverted * b.Inverted).Inverted;
+						break;
 
-				case BlendMode.Screen:
-					b = (a.Inverted * b.Inverted).Inverted;
-					break;
+					case BlendMode.Overlay:
+						if (a < 0.5f)
+						{
+							b = 2f * a * b;
+						}
+						else
+						{
+							b = (2f * a.Inverted * b.Inverted).Inverted;
+						}
+						break;
 
-				case BlendMode.Overlay:
-					if (a < 0.5f)
-					{
-						b = 2f * a * b;
-					}
-					else
-					{
-						b = (2f * a.Inverted * b.Inverted).Inverted;
-					}
-					break;
+					case BlendMode.HardLight:
+						if (b < 0.5f)
+						{
+							b = 2f * a * b;
+						}
+						else
+						{
+							b = (2f * a.Inverted * b.Inverted).Inverted;
+						}
+						break;
 
-				case BlendMode.HardLight:
-					if (b < 0.5f)
-					{
-						b = 2f * a * b;
-					}
-					else
-					{
-						b = (2f * a.Inverted * b.Inverted).Inverted;
-					}
-					break;
+					case BlendMode.SoftLight:
+						b = ((2f * b).Inverted * (a * a)) + (2f * b * a);
+						break;
 
-				case BlendMode.SoftLight:
-					b = ((2f * b).Inverted * (a * a)) + (2f * b * a);
-					break;
+					case BlendMode.ColorDodge:
+						b = a / b.Inverted;
+						break;
 
-				case BlendMode.ColorDodge:
-					b = a / b.Inverted;
-					break;
+					case BlendMode.Burn:
+						b = (b.Inverted / a).Inverted;
+						break;
 
-				case BlendMode.Burn:
-					b = (b.Inverted / a).Inverted;
-					break;
+					case BlendMode.Divide:
+						b = a / b;
+						break;
 
-				case BlendMode.Divide:
-					b = a / b;
-					break;
+					case BlendMode.Add:
+						b += a;
+						break;
 
-				case BlendMode.Add:
-					b += a;
-					break;
+					case BlendMode.Darken:
+						b = ColorOperator.Min(a, b);
+						break;
 
-				case BlendMode.Darken:
-					b = ColorOperator.Min(a, b);
-					break;
-
-				case BlendMode.Lighten:
-					b = ColorOperator.Max(a, b);
-					break;
+					case BlendMode.Lighten:
+						b = ColorOperator.Max(a, b);
+						break;
+				}
 			}
 
 			Texture.SetPixel(x, y, Color.Lerp(a.Color, b.Color, Alpha));
@@ -179,6 +181,7 @@ internal class PaletteEditor
 			Texture.SetPixels(_init);
 			Apply(rCam);
 			Clear();
+			AddToStack();
 		}
 
 		internal void Init()
@@ -194,13 +197,13 @@ internal class PaletteEditor
 
 			if (_index != 0)
 			{
-				_stack.RemoveRange(0, _index);
+				_stack.RemoveRange(0, Math.Min(_index, _stack.Count - 1));
 				_index = 0;
 			}
 			_stack.Insert(0, Texture.GetPixels());
-			if (_stack.Count > _undoStack)
+			if (_stack.Count > UndoStack)
 			{
-				_stack.RemoveRange(_undoStack, _stack.Count - _undoStack);
+				_stack.RemoveRange(UndoStack, _stack.Count - UndoStack);
 			}
 		}
 
@@ -236,7 +239,21 @@ internal class PaletteEditor
 
 		private int ClampIndex(int index)
 		{
-			return Math.Max(0, Math.Min(index, _undoStack - 1));
+			return Math.Max(0, Math.Min(index, UndoStack - 1));
+		}
+
+		internal void CopySunToRain(RoomCamera rCam)
+		{
+			if (Texture == null) return;
+			for (int x = 0; x < 32; x++)
+			{
+				for (int y = 15; y >= 8; y--) // Texture2D index from the bottom left, so start at the top
+				{
+					Texture.SetPixel(x, y - 8, Texture.GetPixel(x, y));
+				}
+			}
+			AddToStack();
+			Apply(rCam);
 		}
 	}
 
@@ -266,7 +283,7 @@ internal class PaletteEditor
 	/// <summary>
 	/// The scale of the palette preview.
 	/// </summary>
-	internal static float PaletteScale { get; } = 10f;
+	internal static float PaletteScale { get => RemixOptions.PaletteImageScale.Value; }
 
 	internal class PalettePage : DevInterface.Page
 	{
@@ -275,9 +292,9 @@ internal class PaletteEditor
 		internal static Vector2 Padding { get; } = new(Margin * 2f, Margin * 2f);
 		internal static float GenericElementHeight { get; } = 20f;
 		internal static FTexture Preview { get; set; }
-		internal static Vector2 PaletteImageSize { get; } = new Vector2(32f, 16f) * PaletteScale;
+		internal static Vector2 PaletteImageSize { get => new Vector2(32f, 16f) * PaletteScale; }
 
-		private static Vector2 _palettePanelSize = PaletteImageSize + new Vector2(0f, GenericElementHeight);
+		private static Vector2 _palettePanelSize { get => PaletteImageSize + new Vector2(0f, (GenericElementHeight * 2f) + Margin); }
 		private SmallElements.BlendModeButton _blendModeButton;
 
 		/// <summary>
@@ -305,6 +322,7 @@ internal class PaletteEditor
 			{
 				palettePreview.subNodes.Add(new SmallElements.PaletteButton(owner, palettePreview, i));
 			}
+			palettePreview.subNodes.Add(new SmallElements.CopySunToRainButton(owner, palettePreview));	
 
 			Panel colorPicker = new(owner, "Color_Picker", this, palettePreview.absPos - new Vector2(200f, 0f), new(190f, 205f), "Color Picker");
 			subNodes.Add(colorPicker);
@@ -335,6 +353,20 @@ internal class PaletteEditor
 
 		internal class SmallElements
 		{
+			internal class CopySunToRainButton : Button
+			{
+				public CopySunToRainButton(DevUI owner, Panel parentNode) : base(owner, "Sun_To_Rain", parentNode, new(Margin, Margin), 100f, "Copy Sun to Rain")
+				{
+				}
+
+				public override void Clicked()
+				{
+					base.Clicked();
+
+					PalettePreviewer.SelectedPalette.CopySunToRain(owner.game.cameras[0]);
+				}
+			}
+
 			internal class ColorHistory : RectangularDevUINode
 			{
 				private int _index;
@@ -589,7 +621,7 @@ internal class PaletteEditor
 
 				public PaletteButton(DevUI owner, Panel parentNode, int index) : 
 					base(owner, $"Palette_Selector{index}", parentNode, 
-						new(Margin + ((RegionKitWrapper.RegionKitEnabled && MoreFadePalettes.Count > 0 && index > 1 ? ((shortWidth + Margin) * (index - 1)) + (normalWidth + Margin) : (normalWidth + Margin) * index)), 5f), 
+						new(Margin + ((RegionKitWrapper.RegionKitEnabled && MoreFadePalettes.Count > 0 && index > 1 ? ((shortWidth + Margin) * (index - 1)) + (normalWidth + Margin) : (normalWidth + Margin) * index)), (Margin * 2f) + GenericElementHeight), 
 						RegionKitWrapper.RegionKitEnabled && MoreFadePalettes.Count > 0 && index > 0 ? shortWidth : normalWidth, 
 						index == 0 ? "Main" : RegionKitWrapper.RegionKitEnabled && MoreFadePalettes.Count > 0 ? $"F{index}" : "Fade")
 				{
@@ -694,6 +726,7 @@ internal class PaletteEditor
 			private static UndoablePalette _selectedPalette;
 
 			private FSprite[] _hoverLines;
+			private List<KeyLine> _keyLines = [];
 			private bool _notUndo;
 			private bool _notRedo;
 			private bool[,] _clickedThisFrame;
@@ -701,7 +734,37 @@ internal class PaletteEditor
 			private int _brushSize = 1;
 			private int _maxBrushSize = 6;
 
-			internal PalettePreviewer(DevUI owner, DevUINode parentNode) : base(owner, "Palette_Image_Preview", parentNode, new(Margin, GenericElementHeight + Margin), PaletteImageSize)
+			internal class KeyLine : FSprite
+			{
+				internal IntVector2 _initialPos; // Based on the bottom left of the pixel it resides on
+				internal int _initialSize;
+				internal bool _vertical;
+
+				internal KeyLine(IntVector2 initialPos, int initialSize, bool vertical) : base("pixel")
+				{
+					_initialPos = initialPos;
+					_initialSize = initialSize;
+					_vertical = vertical;
+
+					if (vertical)
+					{
+						scaleY = (initialSize * PaletteScale);
+						anchorY = 0f;
+					}
+					else
+					{
+						scaleX = initialSize * PaletteScale;
+						anchorX = 0f;
+					}
+				}
+
+				internal void SetPos(Vector2 pos)
+				{
+					SetPosition(pos + new Vector2(_initialPos.x * PaletteScale, ((15 - _initialPos.y) * PaletteScale) + 0.5f));
+				}
+			}
+
+			internal PalettePreviewer(DevUI owner, DevUINode parentNode) : base(owner, "Palette_Image_Preview", parentNode, new(Margin, (GenericElementHeight * 2f) + (Margin * 2f)), PaletteImageSize)
 			{
 				_selectedPalette = MainPalette;
 				Preview = new(_selectedPalette.Texture, "palettePreview")
@@ -719,12 +782,57 @@ internal class PaletteEditor
 				new("pixel") { scaleX = PaletteScale + 1f, anchorX = 0f },
 				new("pixel") { scaleY = PaletteScale, anchorY = 0f },
 				];
+
 				foreach (var f in _hoverLines)
 				{
 					Futile.stage.AddChild(f);
 					fSprites.Add(f);
 				}
 				ResizeHoverLines();
+
+				// Initial ones from the sun palette
+				_keyLines = [
+					// Top row
+					new(new(2, 0), 1, true),
+					new(new(4, 0), 1, true),
+					new(new(9, 0), 1, true),
+					new(new(10, 0), 1, true),
+					new(new(13, 0), 1, true),
+					new(new(30, 0), 1, true),
+					new(new(31, 0), 1, true),
+
+					// Grime dividers
+					new(new(0, 0), 32, false),
+					new(new(0, 1), 32, false),
+
+					// Sun / shade divider
+					new(new(0, 4), 32, false),
+
+					// Sublayer dividers
+					new(new(10, 7), 6, true),
+					new(new(20, 7), 6, true),
+					];
+
+				// Then duplicate them
+				int count = _keyLines.Count;
+				for (int i = 0; i < count; i++)
+				{
+					_keyLines.Add(new(_keyLines[i]._initialPos + new IntVector2(0, 8), _keyLines[i]._initialSize, _keyLines[i]._vertical));
+				}
+
+				_keyLines.Add(new(new(0, 7), 32, false)); // Divider
+				_keyLines.AddRange([
+					new(new(0, -1), 32, false),
+					new(new(0, 15), 16, true),
+					new(new(0, 15), 32, false),
+					new(new(32, 15), 16, true),
+					]); // Surrounding boxes
+
+				foreach (var k in _keyLines)
+				{
+					Futile.stage.AddChild(k);
+					fSprites.Add(k);
+				}
 
 				ResetClicked();
 			}
@@ -733,6 +841,10 @@ internal class PaletteEditor
 			{
 				base.Refresh();
 				MoveSprite(0, absPos);
+				foreach (var k in _keyLines)
+				{
+					k.SetPos(absPos);
+				}
 			}
 
 			public override void Update()

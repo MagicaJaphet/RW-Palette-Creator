@@ -5,6 +5,7 @@ using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
 using RWCustom;
 using System;
+using System.IO;
 using System.Linq;
 using UnityEngine;
 
@@ -62,6 +63,23 @@ internal class Hooks : IOwnHooks
 	private void RoomCamera_LoadPalette(ILContext il)
 	{
 		ILCursor c = new(il);
+
+		static string PrioritizeSavedPalettes(string text, int pal)
+		{
+			if (RemixOptions.LoadSavedPalettes.Value)
+			{
+				string newPath = Path.Combine(PaletteEditor.PalettePage.SmallElements.SaveButton.SavePath, $"palette{pal}.png");
+				if (File.Exists(newPath))
+				{
+					return newPath;
+				}
+			}
+			return text;
+		}
+
+		c.GotoNext(x => x.MatchStloc(0));
+		c.Emit(OpCodes.Ldarg_1);
+		c.EmitDelegate(PrioritizeSavedPalettes);
 
 		static void AddPaletteImageToAtlasManager(RoomCamera self, int pal, ref Texture2D texture, string path)
 		{
