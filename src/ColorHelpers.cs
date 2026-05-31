@@ -30,6 +30,10 @@ internal struct ColorOperator
 	{
 		return new(a + b.clr.r, a + b.clr.g, a + b.clr.b);
 	}
+	public static ColorOperator operator +(ColorOperator b, float a)
+	{
+		return new(a + b.clr.r, a + b.clr.g, a + b.clr.b);
+	}
 
 	public static bool operator <(float a, ColorOperator b)
 	{
@@ -41,11 +45,19 @@ internal struct ColorOperator
 	}
 	public static bool operator <(ColorOperator b, float a)
 	{
-		return a < b.clr.r && a < b.clr.g && a < b.clr.b;
+		return a > b.clr.r && a > b.clr.g && a > b.clr.b;
+	}
+	public static bool operator <=(ColorOperator b, float a)
+	{
+		return a >= b.clr.r && a >= b.clr.g && a >= b.clr.b;
 	}
 	public static bool operator >(ColorOperator b, float a)
 	{
 		return a < b.clr.r && a < b.clr.g && a < b.clr.b;
+	}
+	public static bool operator >=(ColorOperator b, float a)
+	{
+		return a <= b.clr.r && a <= b.clr.g && a <= b.clr.b;
 	}
 
 	public static ColorOperator operator *(float a, ColorOperator b)
@@ -60,6 +72,10 @@ internal struct ColorOperator
 	public static ColorOperator operator -(float a, ColorOperator b)
 	{
 		return new(a - b.clr.r, a - b.clr.g, a - b.clr.b);
+	}
+	public static ColorOperator operator -(ColorOperator a, float b)
+	{
+		return new(a.clr.r - b, a.clr.g - b, a.clr.b - b);
 	}
 
 	public static ColorOperator operator +(ColorOperator a, ColorOperator b)
@@ -110,5 +126,10 @@ internal struct ColorOperator
 	public override int GetHashCode()
 	{
 		return 241020152 + clr.GetHashCode();
+	}
+
+	internal static ColorOperator Sqrt(ColorOperator a)
+	{
+		return new(Mathf.Sqrt(a.clr.r), Mathf.Sqrt(a.clr.g), Mathf.Sqrt(a.clr.b));
 	}
 }

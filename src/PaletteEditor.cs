@@ -8,7 +8,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using UnityEngine;
+using static PaletteEditor.PaletteEditor.PalettePage.PalettePreviewer;
 
 namespace PaletteEditor;
 internal class PaletteEditor
@@ -123,7 +125,18 @@ internal class PaletteEditor
 						break;
 
 					case BlendMode.SoftLight:
-						b = ((2f * b).Inverted * (a * a)) + (2f * b * a);
+						if (b <= 0.5f)
+						{
+							b = a - ((2f * b).Inverted * a * a.Inverted);
+						}
+						else
+						{
+							ColorOperator g = a <= 0.25f ?
+								((((16 * a) - 12f) * a) + 4f) * a
+								: ColorOperator.Sqrt(a);
+
+							b = a + (((2f * b) - 1f) * (g - a));
+						}
 						break;
 
 					case BlendMode.ColorDodge:
@@ -245,7 +258,7 @@ internal class PaletteEditor
 		internal void CopySunToRain(RoomCamera rCam)
 		{
 			if (Texture == null) return;
-			for (int x = 0; x < 32; x++)
+			for (int x = 0; x < PalPixelSize.x; x++)
 			{
 				for (int y = 15; y >= 8; y--) // Texture2D index from the bottom left, so start at the top
 				{
@@ -263,6 +276,344 @@ internal class PaletteEditor
 
 	internal static Configurable<Color> PaintColor = new(null, "_colorPicker", Color.red, null);
 	internal static float Alpha { get; set; } = 1f;
+
+	internal readonly static IntVector2 PalPixelSize = new(32, 16);
+
+	internal static void IterateThroughPixels(Action<int, int> action)
+	{
+		for (int x = 0; x < PalPixelSize.x; x++)
+			for (int y = 0; y < PalPixelSize.y; y++) 
+				action(x, y);
+	}
+
+	internal struct PaletteKey
+	{
+		private string _keyName;
+
+		internal PaletteKey(string key) => _keyName = key;
+
+		internal bool TryGet(out string key)
+		{
+			key = _keyName;
+			return !string.IsNullOrEmpty(_keyName);
+		}
+	}
+
+	private static PaletteKey[,] Init()
+	{
+		var palKeys = new PaletteKey[PalPixelSize.x, PalPixelSize.y];
+
+		string[,] keys = new string[PalPixelSize.x, PalPixelSize.y / 2];
+
+		keys[0, 0] = "Sky";
+		keys[1, 0] = "Fog";
+		keys[2, 0] = "Black";
+		keys[3, 0] = "Item";
+		keys[4, 0] = "Deep Water Top";
+		keys[5, 0] = "Deep Water Bottom";
+		keys[6, 0] = "Water Surface Close";
+		keys[7, 0] = "Water Surface Far";
+		keys[8, 0] = "Water Surface Highlight";
+		keys[9, 0] = "Fog Intensity";
+		keys[10, 0] = "Shortcut Dot";
+		keys[11, 0] = "Shortcut Dot Blink";
+		keys[12, 0] = "Shortcut Dot Travel";
+		keys[13, 0] = "Shortcut Symbol";
+		keys[30, 0] = "Darkness";
+
+		for (int x = 0; x < PalPixelSize.x; x++)
+		{
+			keys[x, 1] = "Grime";
+			if (x < 30)
+			{
+				keys[x, 2] = $"Sun Highlight [{x}]";
+				keys[x, 3] = $"Sun Middle [{x}]";
+				keys[x, 4] = $"Sun Shadow [{x}]";
+				keys[x, 5] = $"Shade Highlight [{x}]";
+				keys[x, 6] = $"Shade Middle [{x}]";
+				keys[x, 7] = $"Shade Shadow [{x}]";
+			}
+			else
+			{
+				keys[x, 2] = "Effect Color (Not Saved)";
+				keys[x, 3] = "Effect Color (Not Saved)";
+				keys[x, 4] = "Effect Color (Not Saved)";
+				keys[x, 5] = "Effect Color (Not Saved)";
+			}
+		}
+
+		for (int x = 0; x < PalPixelSize.x; x++)
+		{
+			for (int y = 0; y < 8; y++)
+			{
+				palKeys[x, y] = new($"{keys[x, y]}");
+				if (!string.IsNullOrEmpty(keys[x, y]))
+					palKeys[x, y + 8] = new($"(Rain) {keys[x, y]}");
+				else
+				{
+					UnusedKeys[x, y] = true;
+					UnusedKeys[x, y + 8] = true;
+				}
+			}
+		}
+
+		return palKeys;
+	}
+
+	public static bool[,] UnusedKeys { get; private set; } = new bool[PalPixelSize.x, PalPixelSize.y];
+
+	internal static PaletteKey[,] PaletteKeys { get; } = Init();
+
+	internal class UnusedKeySprites
+	{
+		internal bool forceHide;
+		private bool _anchorRight;
+		private IntVector2 _key;
+		private FSprite[] _xLines;
+
+		internal UnusedKeySprites(IntVector2 key, DevUINode owner, bool anchorRight)
+		{
+			forceHide = !RemixOptions.ShowUnusedKeyXs.Value;
+			_anchorRight = anchorRight;
+			_key = key;
+			_xLines = [
+				new("pixel") { rotation = 45f },
+				new("pixel") { rotation = 135f }
+				];
+
+			SetScale(PaletteScale);
+
+			foreach (var x in _xLines)
+			{
+				Futile.stage.AddChild(x);
+				owner?.fSprites.Add(x);
+			}
+		}
+
+		internal static UnusedKeySprites[] GetUnusedKeySprites(DevUINode owner, bool anchorRight)
+		{
+			List<UnusedKeySprites> u = [];
+			IterateThroughPixels((x, y) =>
+			{
+				if (UnusedKeys[x, y]) u.Add(new(new(x,y), owner, anchorRight));
+			});
+			return [.. u];
+		}
+
+		internal void SetScale(float scale)
+		{
+			foreach (var x in  _xLines)
+			{
+				x.scaleX = Mathf.Sqrt(2) * scale;
+			}
+		}
+
+		internal void SetPos(Vector2 pos, float scale)
+		{
+			Vector2 offset = new((_key.x * scale) + (scale / 2f), ((15 - _key.y) * scale) + 0.5f + (scale / 2f));
+			foreach (var x in _xLines)
+			{
+				x.SetPosition(pos + offset + new Vector2(_anchorRight ? -((float)PalPixelSize.x * scale) : 0f, 0f));
+			}
+		}
+
+		internal void UpdateColor(Texture2D tex)
+		{
+			if (tex == null) return;
+
+			Color inverted = new ColorOperator(tex.GetPixel(_key.x, (PalPixelSize.y - 1) - _key.y)).Inverted.Color;
+			foreach (var x in _xLines)
+			{
+				x.color = inverted;
+			}
+		}
+
+		internal void Show(bool show)
+		{
+			if (forceHide) show = false;
+
+			foreach (var x in _xLines)
+			{
+				x.isVisible = show;
+			}
+		}
+	}
+
+	internal class KeyLine : FSprite
+	{
+		internal IntVector2 _initialPos; // Based on the bottom left of the pixel it resides on
+		internal int _initialSize;
+		internal bool _vertical;
+		private bool _anchorRight;
+
+		internal KeyLine(IntVector2 initialPos, int initialSize, bool vertical, bool anchorRight) : base("pixel")
+		{
+			_initialPos = initialPos;
+			_initialSize = initialSize;
+			_vertical = vertical;
+			_anchorRight = anchorRight;
+
+			SetScale(PaletteScale);
+		}
+
+		internal void SetScale(float scale)
+		{
+			if (_vertical)
+			{
+				scaleY = (_initialSize * scale);
+				anchorY = 0f;
+			}
+			else
+			{
+				scaleX = _initialSize * scale;
+				anchorX = 0f;
+			}
+		}
+
+		internal void SetPos(Vector2 pos, float scale)
+		{
+			Vector2 offset = new(_initialPos.x * scale, ((15 - _initialPos.y) * scale) + 0.5f);
+			SetPosition(pos + offset + new Vector2(_anchorRight ? -((float)PalPixelSize.x * scale) : 0f, 0f));
+		}
+
+		internal static KeyLine[] GetKeyLines(bool anchorRight)
+		{
+			List<KeyLine> k = [];
+
+			// Initial ones from the sun palette
+			k = [
+				// Top row
+				new(new(2, 0), 1, true, anchorRight),
+				new(new(4, 0), 1, true, anchorRight),
+				new(new(9, 0), 1, true, anchorRight),
+				new(new(10, 0), 1, true, anchorRight),	
+				new(new(13, 0), 1, true, anchorRight),
+				new(new(30, 0), 1, true, anchorRight),
+				new(new(31, 0), 1, true, anchorRight),
+
+				// Grime dividers
+				new(new(0, 0), PalPixelSize.x, false, anchorRight),
+				new(new(0, 1), PalPixelSize.x, false, anchorRight),
+
+				// Sun / shade divider
+				new(new(0, 4), PalPixelSize.x, false, anchorRight),
+
+				// Sublayer dividers
+				new(new(10, 7), 6, true, anchorRight),
+				new(new(20, 7), 6, true, anchorRight),
+			];
+
+			// Then duplicate them
+			int count = k.Count;
+			for (int i = 0; i < count; i++)
+			{
+				k.Add(new(k[i]._initialPos + new IntVector2(0, 8), k[i]._initialSize, k[i]._vertical, anchorRight));
+			}
+
+			k.Add(new(new(0, 7), PalPixelSize.x, false, anchorRight)); // Divider
+
+			foreach (var key in k)
+			{
+				key.isVisible = RemixOptions.ShowKeyLines.Value;
+			}
+
+			k.AddRange([ // Surrounding boxes
+				new(new(0, -1), PalPixelSize.x, false, anchorRight),
+				new(new(0, 15), PalPixelSize.y, true, anchorRight),
+				new(new(0, 15), PalPixelSize.x, false, anchorRight),
+				new(new(PalPixelSize.x, 15), PalPixelSize.y, true, anchorRight),
+				]);
+
+			return [.. k];
+		}
+	}
+
+	internal class HoverToolTip
+	{
+		internal bool forceHide;
+		private float _margin;
+		private FLabel _label;
+		private FSprite _box;
+		private FSprite[] _boxLines;
+		private float _lastValidMouseX;
+
+		internal HoverToolTip(Panel parentNode, DevUINode owner, float margin)
+		{
+			forceHide = !RemixOptions.ShowKeyToolTip.Value;
+			_margin = margin;
+			_label = new FLabel(Custom.GetFont(), "") { anchorX = 0f, anchorY = 0f };
+			_box = new FSprite("pixel")
+			{
+				anchorX = 0f,
+				anchorY = 0f,
+				color = parentNode != null ? parentNode.fSprites[0].color : MenuColorEffect.rgbDarkGrey,
+				alpha = parentNode != null ? parentNode.fSprites[0].alpha : 0.5f,
+				scaleX = margin * 2f,
+				scaleY = _label.FontLineHeight + (margin * 2f)
+			};
+			_boxLines = [
+				new("pixel") { scaleX = _box.scaleX, anchorX = 0f },
+						new("pixel") { scaleY = _box.scaleY + 1.2f, anchorY = 0f },
+						new("pixel") { scaleX = _box.scaleX + 1f, anchorX = 0f },
+						new("pixel") { scaleY = _box.scaleY, anchorY = 0f },
+						];
+
+			Futile.stage.AddChild(_box);
+			owner?.fSprites.Add(_box);
+			Futile.stage.AddChild(_label);
+			owner?.fLabels.Add(_label);
+
+			foreach (var h in _boxLines)
+			{
+				Futile.stage.AddChild(h);
+				owner?.fSprites.Add(h);
+			}
+		}
+
+		internal void Update()
+		{
+			if (Futile.mousePosition.x < Custom.rainWorld.options.ScreenSize.x - _box.scaleX)
+			{
+				_lastValidMouseX = Futile.mousePosition.x + _box.scaleX;
+			}
+			_box.SetPosition(new(Mathf.Min(Futile.mousePosition.x, _lastValidMouseX - _box.scaleX), Mathf.Max(Futile.mousePosition.y, 0f)));
+			_label.SetPosition(_box.GetPosition() + new Vector2(_margin + 0.001f, _margin));
+			for (int i = 0; i < _boxLines.Length; i++)
+			{
+				var line = _boxLines[i];
+				line.SetPosition(_box.GetPosition() + i switch
+				{
+					1 => new Vector2(0f, -0.5f),
+					2 => new Vector2(0f, _box.scaleY),
+					3 => new Vector2(_box.scaleX + 0.5f, 0f),
+					_ => new Vector2()
+				});
+			}
+		}
+
+		internal void SetText(string text)
+		{
+			if (string.IsNullOrEmpty(text)) return;
+			_label.text = text;
+			_box.scaleX = _label.textRect.width + (_margin * 2f);
+
+			_boxLines[0].scaleX = _box.scaleX;
+			_boxLines[2].scaleX = _box.scaleX + 1f;
+		}
+
+		internal void Show(bool show)
+		{
+			if (forceHide) show = false;
+
+			_label.isVisible = show;
+			_box.isVisible = show;
+			foreach (var h in _boxLines)
+			{
+				h.isVisible = show;
+			}
+		}
+	}
+
 	internal enum BlendMode
 	{
 		Normal,
@@ -284,7 +635,6 @@ internal class PaletteEditor
 	/// The scale of the palette preview.
 	/// </summary>
 	internal static float PaletteScale { get => RemixOptions.PaletteImageScale.Value; }
-
 	internal class PalettePage : DevInterface.Page
 	{
 		internal static string Name { get; } = "Palette Editor";
@@ -292,7 +642,7 @@ internal class PaletteEditor
 		internal static Vector2 Padding { get; } = new(Margin * 2f, Margin * 2f);
 		internal static float GenericElementHeight { get; } = 20f;
 		internal static FTexture Preview { get; set; }
-		internal static Vector2 PaletteImageSize { get => new Vector2(32f, 16f) * PaletteScale; }
+		internal static Vector2 PaletteImageSize { get => new Vector2(PalPixelSize.x, PalPixelSize.y) * PaletteScale; }
 
 		private static Vector2 _palettePanelSize { get => PaletteImageSize + new Vector2(0f, (GenericElementHeight * 2f) + Margin); }
 		private SmallElements.BlendModeButton _blendModeButton;
@@ -363,7 +713,7 @@ internal class PaletteEditor
 				{
 					base.Clicked();
 
-					PalettePreviewer.SelectedPalette.CopySunToRain(owner.game.cameras[0]);
+					SelectedPalette.CopySunToRain(owner.game.cameras[0]);
 				}
 			}
 
@@ -386,9 +736,9 @@ internal class PaletteEditor
 					Futile.stage.AddChild(UndoablePalette._historySprites[index]);
 					fSprites.Add(UndoablePalette._historySprites[index]);
 
-					if (PalettePreviewer.SelectedPalette != null && PalettePreviewer.SelectedPalette._history[index] != null)
+					if (SelectedPalette != null && SelectedPalette._history[index] != null)
 					{
-						Color col = PalettePreviewer.SelectedPalette._history[index];
+						Color col = SelectedPalette._history[index];
 						UndoablePalette._historySprites[index].color = col;
 						UndoablePalette._historySprites[index].alpha = col.a;
 					}
@@ -409,7 +759,7 @@ internal class PaletteEditor
 				public override void Update()
 				{
 					base.Update();
-					if (MouseOver && !PalettePreviewer.WasClicked && Input.GetMouseButtonDown(0))
+					if (MouseOver && !WasClicked && Input.GetMouseButtonDown(0))
 					{
 						PaintColor.Value = UndoablePalette._historySprites[_index].color;
 						Alpha = UndoablePalette._historySprites[_index].alpha;
@@ -632,7 +982,7 @@ internal class PaletteEditor
 				{
 					Refresh();
 					base.Clicked();
-					PalettePreviewer.SelectedPalette = _index switch
+					SelectedPalette = _index switch
 					{
 						0 => MainPalette,
 						1 => FadePalette,
@@ -640,8 +990,8 @@ internal class PaletteEditor
 					};
 					for (int i = 0; i < UndoablePalette._colorHistory; i++)
 					{
-						UndoablePalette._historySprites[i].color = PalettePreviewer.SelectedPalette._history[i];
-						UndoablePalette._historySprites[i].alpha = PalettePreviewer.SelectedPalette._history[i].a;
+						UndoablePalette._historySprites[i].color = SelectedPalette._history[i];
+						UndoablePalette._historySprites[i].alpha = SelectedPalette._history[i].a;
 					}
 				}
 			}
@@ -653,7 +1003,7 @@ internal class PaletteEditor
 				public override void Clicked()
 				{
 					base.Clicked();
-					PalettePreviewer.SelectedPalette?.Reset(owner.game.cameras[0]);
+					SelectedPalette?.Reset(owner.game.cameras[0]);
 				}
 			}
 
@@ -682,10 +1032,10 @@ internal class PaletteEditor
 							Directory.CreateDirectory(SavePath);
 						}
 
-						if (PalettePreviewer.SelectedPalette?.Texture != null)
+						if (SelectedPalette?.Texture != null)
 						{
-							Texture2D cloneWithoutEffectCols = PalettePreviewer.SelectedPalette.Texture.Clone();
-							for (int x = 30; x < 32; x++)
+							Texture2D cloneWithoutEffectCols = SelectedPalette.Texture.Clone();
+							for (int x = 30; x < PalPixelSize.x; x++)
 							{
 								for (int y = 0; y < 14; y++)
 								{
@@ -694,11 +1044,11 @@ internal class PaletteEditor
 								}
 							}
 							cloneWithoutEffectCols.Apply();
-							File.WriteAllBytes(Path.Combine(SavePath, $"palette{(PalettePreviewer.SelectedPalette.PalIndex switch
+							File.WriteAllBytes(Path.Combine(SavePath, $"palette{(SelectedPalette.PalIndex switch
 							{
 								0 => owner.room.roomSettings.pal ?? -1,
 								1 => owner.room.roomSettings.fadePalette.palette,
-								_ => RegionKitWrapper.RegionKitEnabled ? RegionKitWrapper.GetPalNumber(owner.room.roomSettings, PalettePreviewer.SelectedPalette.PalIndex) : -1
+								_ => RegionKitWrapper.RegionKitEnabled ? RegionKitWrapper.GetPalNumber(owner.room.roomSettings, SelectedPalette.PalIndex) : -1
 							})}.png"), cloneWithoutEffectCols.EncodeToPNG());
 						}
 					}
@@ -726,45 +1076,19 @@ internal class PaletteEditor
 			private static UndoablePalette _selectedPalette;
 
 			private FSprite[] _hoverLines;
-			private List<KeyLine> _keyLines = [];
+			private KeyLine[] _keyLines = [];
 			private bool _notUndo;
 			private bool _notRedo;
 			private bool[,] _clickedThisFrame;
+			private IntVector2 _exactHoveredPixel;
 			private IntVector2 _hoveredPixel;
 			private int _brushSize = 1;
 			private int _maxBrushSize = 6;
 
-			internal class KeyLine : FSprite
-			{
-				internal IntVector2 _initialPos; // Based on the bottom left of the pixel it resides on
-				internal int _initialSize;
-				internal bool _vertical;
+			private HoverToolTip _hoverTip;
+			private UnusedKeySprites[] _xKeys;
 
-				internal KeyLine(IntVector2 initialPos, int initialSize, bool vertical) : base("pixel")
-				{
-					_initialPos = initialPos;
-					_initialSize = initialSize;
-					_vertical = vertical;
-
-					if (vertical)
-					{
-						scaleY = (initialSize * PaletteScale);
-						anchorY = 0f;
-					}
-					else
-					{
-						scaleX = initialSize * PaletteScale;
-						anchorX = 0f;
-					}
-				}
-
-				internal void SetPos(Vector2 pos)
-				{
-					SetPosition(pos + new Vector2(_initialPos.x * PaletteScale, ((15 - _initialPos.y) * PaletteScale) + 0.5f));
-				}
-			}
-
-			internal PalettePreviewer(DevUI owner, DevUINode parentNode) : base(owner, "Palette_Image_Preview", parentNode, new(Margin, (GenericElementHeight * 2f) + (Margin * 2f)), PaletteImageSize)
+			internal PalettePreviewer(DevUI owner, Panel parentNode) : base(owner, "Palette_Image_Preview", parentNode, new(Margin, (GenericElementHeight * 2f) + (Margin * 2f)), PaletteImageSize)
 			{
 				_selectedPalette = MainPalette;
 				Preview = new(_selectedPalette.Texture, "palettePreview")
@@ -778,9 +1102,9 @@ internal class PaletteEditor
 
 				_hoverLines = [
 					new("pixel") { scaleX = PaletteScale + 1f, anchorX = 0f },
-				new("pixel") { scaleY = PaletteScale + 1f, anchorY = 0f },
-				new("pixel") { scaleX = PaletteScale + 1f, anchorX = 0f },
-				new("pixel") { scaleY = PaletteScale, anchorY = 0f },
+					new("pixel") { scaleY = PaletteScale + 1f, anchorY = 0f },
+					new("pixel") { scaleX = PaletteScale + 1f, anchorX = 0f },
+					new("pixel") { scaleY = PaletteScale, anchorY = 0f },
 				];
 
 				foreach (var f in _hoverLines)
@@ -790,49 +1114,17 @@ internal class PaletteEditor
 				}
 				ResizeHoverLines();
 
-				// Initial ones from the sun palette
-				_keyLines = [
-					// Top row
-					new(new(2, 0), 1, true),
-					new(new(4, 0), 1, true),
-					new(new(9, 0), 1, true),
-					new(new(10, 0), 1, true),
-					new(new(13, 0), 1, true),
-					new(new(30, 0), 1, true),
-					new(new(31, 0), 1, true),
+				_xKeys = UnusedKeySprites.GetUnusedKeySprites(parentNode, false);
 
-					// Grime dividers
-					new(new(0, 0), 32, false),
-					new(new(0, 1), 32, false),
-
-					// Sun / shade divider
-					new(new(0, 4), 32, false),
-
-					// Sublayer dividers
-					new(new(10, 7), 6, true),
-					new(new(20, 7), 6, true),
-					];
-
-				// Then duplicate them
-				int count = _keyLines.Count;
-				for (int i = 0; i < count; i++)
-				{
-					_keyLines.Add(new(_keyLines[i]._initialPos + new IntVector2(0, 8), _keyLines[i]._initialSize, _keyLines[i]._vertical));
-				}
-
-				_keyLines.Add(new(new(0, 7), 32, false)); // Divider
-				_keyLines.AddRange([
-					new(new(0, -1), 32, false),
-					new(new(0, 15), 16, true),
-					new(new(0, 15), 32, false),
-					new(new(32, 15), 16, true),
-					]); // Surrounding boxes
+				_keyLines = KeyLine.GetKeyLines(false);
 
 				foreach (var k in _keyLines)
 				{
 					Futile.stage.AddChild(k);
 					fSprites.Add(k);
 				}
+
+				_hoverTip = new(parentNode, this, Margin);
 
 				ResetClicked();
 			}
@@ -843,7 +1135,11 @@ internal class PaletteEditor
 				MoveSprite(0, absPos);
 				foreach (var k in _keyLines)
 				{
-					k.SetPos(absPos);
+					k.SetPos(absPos, PaletteScale);
+				}
+				foreach (var x in _xKeys)
+				{
+					x.SetPos(absPos, PaletteScale);
 				}
 			}
 
@@ -886,7 +1182,7 @@ internal class PaletteEditor
 
 					if (!Input.GetMouseButton(0) && Input.GetMouseButtonDown(1))
 					{
-						IntVector2 hovered = _hoveredPixel + new IntVector2(_brushSize / 2, _brushSize / 2);
+						IntVector2 hovered = _exactHoveredPixel;
 						SelectedPalette.PickColor(hovered.x, hovered.y);
 					}
 
@@ -914,37 +1210,45 @@ internal class PaletteEditor
 					SelectedPalette?.Redo(owner.game.cameras[0]);
 				}
 
+				Vector2 spritePos = Preview?.GetPosition() ?? absPos;
+				float mouseOffset = (PaletteScale * _brushSize) / 2f;
+
+				_exactHoveredPixel = ClampIntVector(((Vector2)Futile.mousePosition - spritePos - (new Vector2(PaletteScale, PaletteScale) / 2f)) / PaletteImageSize, false);
+				_hoveredPixel = ClampIntVector(((Vector2)Futile.mousePosition - new Vector2(mouseOffset, mouseOffset) - spritePos) / PaletteImageSize, true);
+				Color inverted = new ColorOperator(SelectedPalette.Texture.GetPixel(_hoveredPixel.x, _hoveredPixel.y)).Inverted.Color;
+
 				for (int i = 0; i < 4; i++)
 				{
-					Vector2 spritePos = Preview?.GetPosition() ?? absPos;
-					Vector2 spriteSize = PaletteImageSize;
-					float mouseOffset = (PaletteScale * _brushSize) / 2f;
-					
-					Vector2 mouseLerp = ((Vector2)Futile.mousePosition - new Vector2(mouseOffset, mouseOffset) - spritePos) / PaletteImageSize;
-
-					_hoveredPixel = ClampIntVector(mouseLerp);
-
-					MoveSprite(i + 1, GetHoverPos(new(Mathf.Lerp(spritePos.x, spritePos.x + spriteSize.x, _hoveredPixel.x / 32f), Mathf.Lerp(spritePos.y, spritePos.y + spriteSize.y, _hoveredPixel.y / 16f)), i));
+					MoveSprite(i + 1, GetHoverPos(new(Mathf.Lerp(spritePos.x, spritePos.x + PaletteImageSize.x, _hoveredPixel.x / (float)PalPixelSize.x), Mathf.Lerp(spritePos.y, spritePos.y + PaletteImageSize.y, _hoveredPixel.y / (float)PalPixelSize.y)), i));
 					if (_hoverLines != null && i < _hoverLines.Length)
 					{
 						_hoverLines[i].isVisible = MouseOver;
 						if (SelectedPalette?.Texture != null)
 						{
-							Color pixel = SelectedPalette.Texture.GetPixel(_hoveredPixel.x, _hoveredPixel.y);
-							_hoverLines[i].color = new(1f - pixel.r, 1f - pixel.g, 1f - pixel.b);
+							_hoverLines[i].color = inverted;
 						}
 					}
 				}
+
+				foreach (var x in _xKeys)
+				{
+					x.UpdateColor(SelectedPalette.Texture);
+				}
+
+				_hoverTip?.Update();
+				bool getStringKey = PaletteKeys[_exactHoveredPixel.x, 15 - _exactHoveredPixel.y].TryGet(out string key);
+				_hoverTip?.Show(MouseOver && !Input.anyKey && getStringKey);
+				_hoverTip?.SetText(key);
 			}
 
-			private IntVector2 ClampIntVector(Vector2 mouseLerp)
+			private IntVector2 ClampIntVector(Vector2 mouseLerp, bool brush)
 			{
-				return new(ClampTilePositon(mouseLerp.x, 32), ClampTilePositon(mouseLerp.y, 16));
+				return new(ClampTilePositon(mouseLerp.x, PalPixelSize.x, brush), ClampTilePositon(mouseLerp.y, PalPixelSize.y, brush));
 			}
 
-			private int ClampTilePositon(float mouseLerp, int limit)
+			private int ClampTilePositon(float mouseLerp, int limit, bool brush)
 			{
-				return (int)Mathf.Max(0f, Mathf.Min(Mathf.Round(mouseLerp * limit), limit - _brushSize));
+				return (int)Mathf.Max(0f, Mathf.Min(Mathf.Round(mouseLerp * limit), limit - (brush ? _brushSize : 1)));
 			}
 
 			private void ResizeHoverLines()
@@ -959,7 +1263,7 @@ internal class PaletteEditor
 
 			private void ResetClicked()
 			{
-				_clickedThisFrame = new bool[32, 16];
+				_clickedThisFrame = new bool[PalPixelSize.x, PalPixelSize.y];
 			}
 
 			private Vector2 GetHoverPos(Vector2 pos, int i)
@@ -999,7 +1303,7 @@ internal class PaletteEditor
 			{
 				base.Update();
 
-				if (!PalettePreviewer.WasClicked)
+				if (!WasClicked)
 				{
 					if (_lastColorValue != PaintColor.Value)
 					{

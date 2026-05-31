@@ -8,6 +8,7 @@ using Menu.Remix.MixedUI;
 using UnityEngine;
 using System.IO;
 using Menu.Remix.MixedUI.ValueTypes;
+using RWCustom;
 
 // Allows access to private members
 #pragma warning disable CS0618
@@ -53,6 +54,8 @@ sealed class Plugin : PluginTemplate
 
 internal class RemixOptions : OptionInterface
 {
+	private Vector2 _nextItemPos;
+
 	public static RemixOptions Instance { get; } = new();
 	public static void RegisterOI()
 	{
@@ -68,11 +71,24 @@ internal class RemixOptions : OptionInterface
 		"The number of undos avaliable per loaded palette.",
 		null, "", null));
 
+	public static Configurable<bool> LoadSavedPalettes { get; } = Instance.config.Bind(nameof(LoadSavedPalettes), true, new ConfigurableInfo(
+		"Whether the game should prioritize any saved palettes when loading a palette file.",
+		null, "", null));
+
 	public static Configurable<float> PaletteImageScale { get; } = Instance.config.Bind(nameof(PaletteImageScale), 10f, new ConfigurableInfo(
 		"The size of the editting palette.",
 		null, "", null));
-	public static Configurable<bool> LoadSavedPalettes { get; } = Instance.config.Bind(nameof(LoadSavedPalettes), true, new ConfigurableInfo(
-		"Whether the game should prioritize any saved palettes when loading a palette file.",
+
+	public static Configurable<bool> ShowKeyLines { get; } = Instance.config.Bind(nameof(ShowKeyLines), true, new ConfigurableInfo(
+		"Whether the palette key will have the main key lines ontop for distinction.",
+		null, "", null));
+
+	public static Configurable<bool> ShowKeyToolTip { get; } = Instance.config.Bind(nameof(ShowKeyToolTip), true, new ConfigurableInfo(
+		"Whether to show what value is being currently hovered.",
+		null, "", null));
+
+	public static Configurable<bool> ShowUnusedKeyXs { get; } = Instance.config.Bind(nameof(ShowUnusedKeyXs), true, new ConfigurableInfo(
+		"Whether to show what keys are not in use.",
 		null, "", null));
 
 	public OpTab ModOptionsTab { get; private set; }
@@ -85,42 +101,103 @@ internal class RemixOptions : OptionInterface
 
 		Tabs = [ModOptionsTab];
 
-		OpDragger drag = new(UndoStack, new(Margin, ModOptionsTab.CanvasSize.y - (Margin * 3f)))
-		{
-			max = 100,
-			min = 0,
-			description = UndoStack.info.description
-		};
-		OpLabel dragLabel = new(drag.pos.x + drag.size.x + Margin, drag.pos.y, "Undo Stack");
+		_nextItemPos = new(Margin, ModOptionsTab.CanvasSize.y - (Margin * 3f));
 
-		OpCheckBox check = new(LoadSavedPalettes, drag.pos + new Vector2(0f, -(drag.size.y + Margin)))
-		{
-			description = LoadSavedPalettes.info.description
-		};
-		OpLabel checkLabel = new(check.pos.x + check.size.x + Margin, check.pos.y, "Prioritize Saved Palettes");
-
-		PreviewPalette imageSize = new(PaletteImageScale, check.pos + new Vector2(0f, -(check.size.y + Margin)), ModOptionsTab._container.GetPosition() + new Vector2(ModOptionsTab.CanvasSize.x - Margin, Margin), 100, 0)
+		AddItem(new OpDragger(UndoStack, _nextItemPos) { max = 100, min = 0 }, "Undo Stack");
+		AddItem(new OpCheckBox(LoadSavedPalettes, _nextItemPos), "Prioritize Saved Palettes");
+		AddItem(new PaletteScaleSlider(PaletteImageScale, _nextItemPos, ModOptionsTab._container.GetPosition() + new Vector2(ModOptionsTab.CanvasSize.x - Margin, Margin), 100, 0)
 		{
 			max = 15f,
 			min = 8f,
 			_increment = 50,
-			description = PaletteImageScale.info.description
-		};
-		OpLabel previewLabel = new(imageSize.pos.x + imageSize.size.x + Margin, imageSize.pos.y, "Image Scale");
-
-		ModOptionsTab.AddItems(drag, dragLabel, check, checkLabel, imageSize, previewLabel);
+		}, "Image Scale");
+		AddItem(new KeyLineCheckBox(ShowKeyLines, _nextItemPos), "Show Key Lines");
+		AddItem(new KeyToolTipButton(ShowKeyToolTip, _nextItemPos), "Show Key ToolTip");
+		AddItem(new UnusedKeysButton(ShowUnusedKeyXs, _nextItemPos), "Use Xs for Unused Keys");
 	}
 
-	internal class PreviewPalette : OpFloatSlider
+	internal void AddItem(UIconfig item, string text)
+	{
+		_nextItemPos = item.pos + new Vector2(0f, -(item.size.y + Margin));
+
+		item.description = item.cfgEntry.info.description;
+		OpLabel label = new(item.pos.x + item.size.x + Margin, item.pos.y, text);
+
+		ModOptionsTab.AddItems(item, label);
+	}
+
+	internal class UnusedKeysButton : OpCheckBox
+	{
+		public UnusedKeysButton(Configurable<bool> config, Vector2 pos) : base(config, pos)
+		{
+		}
+
+		public override void Change()
+		{
+			base.Change();
+
+			if (PaletteScaleSlider._xLines != null)
+			{
+				foreach (var x in PaletteScaleSlider._xLines)
+				{
+					x.forceHide = !this.GetValueBool();
+					x.Show(this.GetValueBool());
+				}
+			}
+		}
+	}
+
+	internal class KeyToolTipButton : OpCheckBox
+	{
+		public KeyToolTipButton(Configurable<bool> config, Vector2 pos) : base(config, pos)
+		{
+		}
+
+		public override void Change()
+		{
+			base.Change();
+			
+			if (PaletteScaleSlider._hoverKey != null)
+			{
+				PaletteScaleSlider._hoverKey.forceHide = !this.GetValueBool();
+			}
+		}
+	}
+
+
+	internal class KeyLineCheckBox : OpCheckBox
+	{
+		public KeyLineCheckBox(Configurable<bool> config, Vector2 pos) : base(config, pos)
+		{
+		}
+
+		public override void Change()
+		{
+			base.Change();
+			if (PaletteScaleSlider._keyLines != null)
+			{
+				for (int i = 0; i < PaletteScaleSlider._keyLines.Length - 4; i++)
+				{
+					PaletteScaleSlider._keyLines[i].isVisible = this.GetValueBool();
+				}
+			}
+		}
+	}
+
+	internal class PaletteScaleSlider : OpFloatSlider
 	{
 		private FTexture _paletteImage;
 		private static Texture2D _outskirtsPalette;
+		internal static PaletteEditor.KeyLine[] _keyLines;
+		private IntVector2 _exactHoveredPixel;
+		internal static PaletteEditor.HoverToolTip _hoverKey;
+		internal static PaletteEditor.UnusedKeySprites[] _xLines;
 
-		public PreviewPalette(Configurable<float> config, Vector2 pos, Vector2 imagePos, int length, byte decimalNum = 1, bool vertical = false) : base(config, pos, length, decimalNum, vertical)
+		public PaletteScaleSlider(Configurable<float> config, Vector2 pos, Vector2 imagePos, int length, byte decimalNum = 1, bool vertical = false) : base(config, pos, length, decimalNum, vertical)
 		{
 			if (_outskirtsPalette == null)
 			{
-				_outskirtsPalette = new Texture2D(32, 16, TextureFormat.ARGB32, false);
+				_outskirtsPalette = new Texture2D(PaletteEditor.PalPixelSize.x, PaletteEditor.PalPixelSize.y, TextureFormat.ARGB32, false);
 				try
 				{
 					AssetManager.SafeWWWLoadTexture(ref _outskirtsPalette, "file:///" + AssetManager.ResolveFilePath(Path.Combine("Palettes", "palette0.png")), false, true);
@@ -130,15 +207,70 @@ internal class RemixOptions : OptionInterface
 			_paletteImage = new(_outskirtsPalette) { anchorX = 1f, anchorY = 0f, scale = float.Parse(PaletteImageScale.defaultValue) };
 			Futile.stage.AddChild(_paletteImage);
 			_paletteImage.SetPosition(imagePos);
+
+			_xLines = PaletteEditor.UnusedKeySprites.GetUnusedKeySprites(null, true);
+			foreach (var x in _xLines)
+			{
+				x.UpdateColor(_outskirtsPalette);
+			}
+
+			_keyLines = PaletteEditor.KeyLine.GetKeyLines(true);
+			foreach (var k in _keyLines)
+			{
+				Futile.stage.AddChild(k);
+				k.SetPos(_paletteImage.GetPosition(), float.Parse(PaletteImageScale.defaultValue));
+			}
+
+			_hoverKey = new PaletteEditor.HoverToolTip(null, null, Margin);
+		}
+
+		public override void Update()
+		{
+			base.Update();
+
+			if (_paletteImage != null)
+			{
+				Vector2 m = Futile.mousePosition;
+				Vector2 p = _paletteImage.GetPosition();
+				Vector2 pS = new(_paletteImage.width, _paletteImage.height);
+				float value = this.GetValueFloat();
+
+				_exactHoveredPixel = ClampIntVector((m - p + new Vector2(pS.x, 0f) - (new Vector2(_paletteImage.scale, _paletteImage.scale) / 2f)) / new Vector2((float)PaletteEditor.PalPixelSize.x * value, (float)PaletteEditor.PalPixelSize.y * value));
+				_hoverKey?.Update();
+				bool getStringKey = PaletteEditor.PaletteKeys[_exactHoveredPixel.x, (PaletteEditor.PalPixelSize.y - 1) - _exactHoveredPixel.y].TryGet(out string key);
+				_hoverKey?.Show(m.x < p.x && m.x > p.x - pS.x && m.y > p.y && m.y < p.y + pS.y && getStringKey && !Input.anyKey);
+				_hoverKey?.SetText(key);
+			}
+		}
+
+		private IntVector2 ClampIntVector(Vector2 mouseLerp)
+		{
+			return new(ClampTilePositon(mouseLerp.x, PaletteEditor.PalPixelSize.x), ClampTilePositon(mouseLerp.y, PaletteEditor.PalPixelSize.y));
+		}
+
+		private int ClampTilePositon(float mouseLerp, int limit)
+		{
+			return (int)Mathf.Max(0f, Mathf.Min(Mathf.Round(mouseLerp * limit), limit - 1));
 		}
 
 		public override void Change()
 		{
 			base.Change();
 
+			float value = this.GetValueFloat();
 			if (_paletteImage != null)
 			{
-				_paletteImage.scale = this.GetValueFloat();
+				_paletteImage.scale = value;
+			}
+			foreach (var k in _keyLines)
+			{
+				k?.SetScale(value);
+				k?.SetPos(_paletteImage.GetPosition(), value);
+			}
+			foreach (var x in _xLines)
+			{
+				x?.SetScale(value);
+				x?.SetPos(_paletteImage.GetPosition(), value);
 			}
 		}
 
@@ -146,6 +278,17 @@ internal class RemixOptions : OptionInterface
 		{
 			if (_paletteImage != null)
 				_paletteImage.isVisible = false;
+			foreach (var k in _keyLines)
+			{
+				if (k != null)
+				{
+					k.isVisible = false;
+				}
+			}
+			foreach (var x in _xLines)
+			{
+				x.Show(false);
+			}
 			base.Deactivate();
 		}
 
@@ -153,6 +296,17 @@ internal class RemixOptions : OptionInterface
 		{
 			if (_paletteImage != null)
 				_paletteImage.isVisible = true;
+			foreach (var k in _keyLines)
+			{
+				if (k != null)
+				{
+					k.isVisible = true;
+				}
+			}
+			foreach (var x in _xLines)
+			{
+				x.Show(true);
+			}
 			base.Reactivate();
 		}
 	}
