@@ -83,7 +83,7 @@
 		<Private>false</Private>
 	</Reference>
 		
-	<Reference Include="$(ModPath)/2920439476/newest/plugins/RegionKit.dll" Publicize ="True">
+	<Reference Include="$(ModPath)/2920439476/newest/plugins/RegionKit.dll" Publicize="True">
 		<Private>false</Private>
 	</Reference>
 		
@@ -99,9 +99,9 @@
         
     <Delete Files="@(RemovePlugins)" />
   </Target>
-    
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="&quot;C:\Users\linda\Documents\Rain Mods\- Magica Hooking Library\build_event.sh&quot;" />
-  </Target>
+
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
+		<Exec Command="taskkill /IM Rainworld.exe /T /F /FI &quot;STATUS eq RUNNING&quot; &amp;&amp; powershell start-process '$(RWInstallation)/RainWorld.exe' &amp;&amp; exit" />
+	</Target>
 
 </Project>

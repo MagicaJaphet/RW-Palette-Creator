@@ -21,6 +21,7 @@ internal class Hooks : IOwnHooks
 		if (RegionKitWrapper.RegionKitEnabled)
 			RegionKitWrapper.Hooks();
 
+		On.WaterLight.DrawUpdate += WaterLight_DrawUpdate;
 		_ = new Hook(typeof(RoomCamera).GetProperty(nameof(RoomCamera.DarkPalette), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetGetMethod(true), RoomCamera_DarkPalette);
 		On.RainWorldGame.AllowRainCounterToTick += RainWorldGame_AllowRainCounterToTick;
 
@@ -31,6 +32,14 @@ internal class Hooks : IOwnHooks
 		On.DevInterface.DevUI.ctor += DevUI_ctor;
 		On.DevInterface.Page.SwitchPageButtonPos += Page_SwitchPageButtonPos;
 		On.DevInterface.DevUI.SwitchPage += DevUI_SwitchPage;
+	}
+
+	private void WaterLight_DrawUpdate(On.WaterLight.orig_DrawUpdate orig, WaterLight self, Vector2 camPos)
+	{
+		if (self.waterObject != null)
+		{
+			orig(self, camPos);
+		}
 	}
 
 	internal static float RoomCamera_DarkPalette(Func<RoomCamera, float> orig, RoomCamera self)

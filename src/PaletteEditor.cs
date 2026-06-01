@@ -241,6 +241,7 @@ internal class PaletteEditor
 		private void Clear()
 		{
 			_stack.Clear();
+			_index = 0;
 		}
 
 		private Color[] GetStack(int index)
@@ -784,6 +785,18 @@ internal class PaletteEditor
 				}
 			}
 
+			internal static void DestroyTheFUCKINGWater(DevUI owner)
+			{
+				owner.room.water = false;
+				owner.room.waterObject.fWaterLevel = -100f;
+				owner.room.waterObject.lastFWaterLevel = -100f;
+				owner.game.cameras[0].waterLight?.CleanOut();
+				owner.game.cameras[0].waterLight = null;
+				owner.room.waterObject.Destroy();
+				owner.room.drawableObjects.Remove(owner.room.waterObject);
+				owner.room.waterObject = null;
+			}
+
 			internal class WaterButton : Button
 			{
 				public WaterButton(DevUI owner, Panel parentNode) : base(owner, "Add_Water", parentNode, new(5f, 30f), 190f, owner.room.waterObject != null ? "Remove Water" : "Add Water") { }
@@ -797,10 +810,7 @@ internal class PaletteEditor
 					}
 					else
 					{
-						owner.room.waterObject.fWaterLevel = -100f;
-						owner.room.waterObject.lastFWaterLevel = -100f;
-						owner.room.waterObject.Destroy();
-						owner.room.waterObject = null;
+						DestroyTheFUCKINGWater(owner);
 					}
 					Text = owner.room.waterObject != null ? "Remove Water" : "Add Water";
 					Refresh();
@@ -840,10 +850,7 @@ internal class PaletteEditor
 
 						if (owner.room.waterObject != null)
 						{
-							owner.room.waterObject.fWaterLevel = -100f;
-							owner.room.waterObject.lastFWaterLevel = -100f;
-							owner.room.waterObject.Destroy();
-							owner.room.waterObject = null;
+							DestroyTheFUCKINGWater(owner);
 
 							owner.room.defaultWaterLevel = (int)Mathf.Lerp(0f, owner.room.TileHeight, waterHeight);
 							owner.room.AddWater();

@@ -52,6 +52,8 @@ sealed class Plugin : PluginTemplate
     }
 }
 
+// TODO: Clean up code (Make palette preview its own class that isnt menu dependant so ppl can technically use it anywhere! wow...
+
 internal class RemixOptions : OptionInterface
 {
 	private Vector2 _nextItemPos;
